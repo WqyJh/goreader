@@ -36,6 +36,10 @@ var (
 	// ErrBadManifest occurs when a manifest in content.opf references an item
 	// that does not exist in the zip.
 	ErrBadManifest = errors.New("epub: manifest references non-existent item")
+
+	// ErrNoNcx occurrs when a content.opf contains a spine without any
+	// ncx entries.
+	ErrNoNcx = errors.New("epub: no ncx item found in spine")
 )
 
 // Reader represents a readable epub file.
@@ -66,6 +70,8 @@ type Package struct {
 	Metadata
 	Manifest
 	Spine
+	Guide
+	Ncx
 }
 
 // Metadata contains publishing information about the epub.
@@ -112,6 +118,36 @@ type Spine struct {
 type Itemref struct {
 	IDREF string `xml:"idref,attr"`
 	*Item
+}
+
+type Guide struct {
+	References []Reference `xml:"guide>reference"`
+}
+
+type Reference struct {
+	Type  string `xml:"type,attr"`
+	Title string `xml:"title,attr"`
+	HREF  string `xml:"href,attr"`
+}
+
+type Ncx struct {
+	DocTitle  string `xml:"docTitle>text"`
+	DocAuthor string `xml:"docAuthor>text"`
+	NavMap    NavMap `xml:"navMap"`
+}
+
+type NavMap struct {
+	NavPoints []*NavPoint `xml:"navPoint"`
+}
+
+type NavPoint struct {
+	ID        string `xml:"id,attr"`
+	PlayOrder int    `xml:"playOrder,attr"`
+	NavLabel  string `xml:"navLabel>text"`
+	Content   struct {
+		Src string `xml:"src,attr"`
+	} `xml:"content"`
+	NavPoints []*NavPoint `xml:"navPoint"`
 }
 
 // OpenReader will open the epub file specified by name and return a
@@ -175,6 +211,10 @@ func (r *Reader) init(z *zip.Reader) error {
 		return err
 	}
 	err = r.setItems()
+	if err != nil {
+		return err
+	}
+	err = r.setNcx()
 	if err != nil {
 		return err
 	}
@@ -260,6 +300,45 @@ func (r *Reader) setItems() error {
 
 	if itemrefCount < 1 {
 		return ErrNoItemref
+	}
+
+	return nil
+}
+
+func (r *Reader) setNcx() error {
+	for _, rf := range r.Container.Rootfiles {
+		var ncxItem *Item
+
+		for i := range rf.Manifest.Items {
+			v := &rf.Manifest.Items[i]
+			if v.ID == "ncx" {
+				ncxItem = v
+				break
+			} else if v.MediaType == "application/x-dtbncx+xml" {
+				ncxItem = v
+				break
+			}
+		}
+
+		if ncxItem == nil {
+			return ErrNoNcx
+		}
+
+		f, err := ncxItem.Open()
+		if err != nil {
+			return err
+		}
+
+		var b bytes.Buffer
+		_, err = io.Copy(&b, f)
+		if err != nil {
+			return err
+		}
+
+		err = xml.Unmarshal(b.Bytes(), &rf.Ncx)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
