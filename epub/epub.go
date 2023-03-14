@@ -195,6 +195,10 @@ func NewReader(ra io.ReaderAt, size int64) (*Reader, error) {
 	return r, nil
 }
 
+func (r *Reader) Files() map[string]*zip.File {
+	return r.files
+}
+
 func (r *Reader) init(z *zip.Reader) error {
 	// Create a file lookup table
 	r.files = make(map[string]*zip.File)
